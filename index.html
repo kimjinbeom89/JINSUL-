@@ -4,7 +4,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>초진환자 통계 요약</title>
+  <title>초진환자 통계 분석기</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <style>
     body {
       font-family: 'Arial', sans-serif;
@@ -31,49 +32,84 @@
     tr:nth-child(even) {
       background-color: #f1f3f5;
     }
+    input {
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
-  <h1>초진 + 90일초진 환자 통계 요약</h1>
-  <p>아래 표는 진료실 및 전체 기준의 내원, 주사처방 관련 통계를 요약한 것입니다.</p>
+  <h1>📊 초진환자 통계 분석기</h1>
+  <p>엑셀 파일(.xlsx)을 업로드하면 초진환자 통계를 자동 분석합니다.</p>
 
-  <table>
-    <thead>
-      <tr>
-        <th>구분</th>
-        <th>초진환자수</th>
-        <th>재진환자수</th>
-        <th>총환자수</th>
-        <th>평균내원횟수</th>
-        <th>1회</th>
-        <th>2회</th>
-        <th>3회</th>
-        <th>4회</th>
-        <th>5회+</th>
-        <th>재내원률</th>
-        <th>주사처방률</th>
-        <th>평균주사횟수</th>
-        <th>주사처방자 평균내원</th>
-        <th>주사처방자 재진율</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>전체</td><td>527</td><td>2976</td><td>3504</td><td>2.7</td><td>42%</td><td>19%</td><td>13%</td><td>10%</td><td>16%</td><td>58%</td><td>55%</td><td>2.1</td><td>3.1</td><td>70%</td>
-      </tr>
-      <tr>
-        <td>1진료실</td><td>117</td><td>1251</td><td>1368</td><td>2.7</td><td>44%</td><td>22%</td><td>13%</td><td>6%</td><td>15%</td><td>56%</td><td>45%</td><td>2.1</td><td>2.9</td><td>68%</td>
-      </tr>
-      <tr>
-        <td>2진료실</td><td>122</td><td>765</td><td>887</td><td>2.9</td><td>35%</td><td>23%</td><td>12%</td><td>12%</td><td>17%</td><td>65%</td><td>67%</td><td>2.1</td><td>3.2</td><td>71%</td>
-      </tr>
-      <tr>
-        <td>3진료실</td><td>120</td><td>457</td><td>577</td><td>2.9</td><td>36%</td><td>24%</td><td>9%</td><td>13%</td><td>18%</td><td>64%</td><td>75%</td><td>2.3</td><td>3.4</td><td>78%</td>
-      </tr>
-      <tr>
-        <td>11진료실</td><td>37</td><td>217</td><td>254</td><td>2.5</td><td>51%</td><td>8%</td><td>16%</td><td>11%</td><td>14%</td><td>49%</td><td>3%</td><td>4.0</td><td>4.0</td><td>100%</td>
-      </tr>
-    </tbody>
-  </table>
+  <input type="file" id="fileInput" accept=".xlsx" />
+  <div id="output"></div>
+
+  <script>
+    document.getElementById('fileInput').addEventListener('change', handleFile, false);
+
+    function handleFile(event) {
+      const file = event.target.files[0];
+      const reader = new FileReader();
+
+      reader.onload = function (e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet);
+
+        analyzeData(json);
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+
+    function analyzeData(data) {
+      const initialPatients = data.filter(row => row['초/재'] === '신환' || row['초/재'] === '90일초진');
+      const patientMap = {};
+
+      initialPatients.forEach(row => {
+        const id = row['챠트번호'];
+        if (!patientMap[id]) patientMap[id] = [];
+        patientMap[id].push(row);
+      });
+
+      const visitCounts = Object.values(patientMap).map(v => v.length);
+      const avgVisits = (visitCounts.reduce((a, b) => a + b, 0) / visitCounts.length).toFixed(1);
+      const returnRate = ((visitCounts.filter(v => v >= 2).length / visitCounts.length) * 100).toFixed(0);
+      const visitTiers = {
+        '1회': visitCounts.filter(v => v === 1).length,
+        '2회': visitCounts.filter(v => v === 2).length,
+        '3회': visitCounts.filter(v => v === 3).length,
+        '4회': visitCounts.filter(v => v === 4).length,
+        '5회이상': visitCounts.filter(v => v >= 5).length
+      };
+
+      const injected = Object.entries(patientMap).filter(([id, visits]) => visits.some(v => (v['마취'] + '').includes('●')));
+      const injectionRate = ((injected.length / visitCounts.length) * 100).toFixed(0);
+      const injectionVisits = injected.map(([id, visits]) => visits.filter(v => (v['마취'] + '').includes('●')).length);
+      const avgInjectionCount = (injectionVisits.reduce((a, b) => a + b, 0) / injectionVisits.length).toFixed(1);
+      const avgInjectionVisits = (injected.map(([id, visits]) => visits.length).reduce((a, b) => a + b, 0) / injected.length).toFixed(1);
+      const injectedReturnRate = ((injected.filter(([id, visits]) => visits.length >= 2).length / injected.length) * 100).toFixed(0);
+
+      const outputHTML = `
+        <h2>📈 분석 결과</h2>
+        <table>
+          <tr><th>초진환자수</th><td>${visitCounts.length}</td></tr>
+          <tr><th>평균내원횟수</th><td>${avgVisits}</td></tr>
+          <tr><th>1회</th><td>${visitTiers['1회']}명 (${((visitTiers['1회']/visitCounts.length)*100).toFixed(0)}%)</td></tr>
+          <tr><th>2회</th><td>${visitTiers['2회']}명</td></tr>
+          <tr><th>3회</th><td>${visitTiers['3회']}명</td></tr>
+          <tr><th>4회</th><td>${visitTiers['4회']}명</td></tr>
+          <tr><th>5회 이상</th><td>${visitTiers['5회이상']}명</td></tr>
+          <tr><th>재내원률</th><td>${returnRate}%</td></tr>
+          <tr><th>주사처방률</th><td>${injectionRate}%</td></tr>
+          <tr><th>평균 주사 횟수</th><td>${avgInjectionCount}</td></tr>
+          <tr><th>주사처방자 평균 내원횟수</th><td>${avgInjectionVisits}</td></tr>
+          <tr><th>주사처방자 재진율</th><td>${injectedReturnRate}%</td></tr>
+        </table>`;
+
+      document.getElementById('output').innerHTML = outputHTML;
+    }
+  </script>
 </body>
 </html>
